@@ -79,8 +79,12 @@ Ask these 4 questions **one at a time**, wait for each answer:
 - `skills/slide-html/references/animation-patterns.md`
 - `skills/slide-html/references/html-template.md`
 - `skills/slide-html/references/vn-typography.md` ← only if VN or song ngữ
+- `skills/slide-html/assets/heroicons.js` ← for all slides with icons
+- `skills/slide-html/assets/chart-generators.js` ← for stats/metrics slides
+- `skills/slide-html/assets/diagram-generators.js` ← for process/workflow slides
+- `skills/slide-html/assets/ornament-generators.js` ← for decorative elements
 
-**Generate** a single self-contained HTML file.
+**Generate** a single self-contained HTML file with visual elements on every content slide.
 
 **Before generating, create output directory:**
 ```bash
@@ -96,6 +100,36 @@ Where:
 - `YYYY-MM-DD` = today's date
 - `deck-slug` = deck title in kebab-case (lowercase, bỏ dấu tiếng Việt, dấu cách → `-`)
   - Ví dụ: "Khóa Học AI 2025" → `khoa-hoc-ai-2025`
+
+---
+
+### Slide Generation Workflow
+
+**For each slide, follow this sequence:**
+
+1. **Identify slide type** — compare against the Slide Type → Visual Element Mapping table (see Visual Elements Standard section below)
+2. **Choose visual element** — pick the Primary Visual from the mapping:
+   - If it's a **chart** → use `generateBarChart()`, `generatePieChart()`, or `generateLineChart()`
+   - If it's a **diagram** → use `generateFlowchart()`, `generateTimeline()`, `generateProcessSteps()`, or `generateComparison()`
+   - If it's an **icon** → embed `heroicons[name]` inline in heading or beside content
+   - If it's an **ornament** → use `generateTopBorder()`, `generateDividerLine()`, `generateCornerAccent()`, or `generateGradientBg()`
+   - If it's a **media slot** → create labeled placeholder for user images
+3. **Generate and embed** — call the appropriate function and insert its output:
+   ```javascript
+   const chartSvg = generateBarChart(data, colors, options);
+   // Wrap in div with data-anim for layer reveal:
+   slideHtml += `<div data-anim="fade-in" style="--d:2">${chartSvg}</div>`;
+   ```
+4. **Add layer structure** — split content into `data-anim` groups:
+   - Layer 1: Slide title + heading visual
+   - Layer 2: Chart/diagram OR main content
+   - Layer 3+: Additional details, bullets, footer
+5. **Add speaker notes** — every `<section class="slide">` must have `data-notes="..."` with talking points that reference the visual
+6. **Test in Presenter Mode** — ensure:
+   - Layers reveal in logical order
+   - Visual doesn't overlap text
+   - Zoom works smoothly on the chart/diagram
+   - Speaker notes mention the visual's key takeaway
 
 **Hard constraints — enforce on every slide, no exceptions:**
 
@@ -234,6 +268,291 @@ document.addEventListener('keydown', e => {
 });
 // Touch swipe: deltaX > 50 = next, deltaX < -50 = prev
 ```
+
+---
+
+---
+
+## Visual Element Generation Strategy
+
+**Every content slide MUST include at least one non-text visual element.**
+
+This section defines which visual types fit each slide type, and how to generate them using the SVG asset library.
+
+### Visual Element Asset Library
+
+**Location:** `skills/slide-html/assets/`
+
+```
+assets/
+├── heroicons.js              (24 most-used icons as inline SVG)
+├── chart-generators.js       (bar, pie, line charts + progress bars)
+├── diagram-generators.js     (flowchart, timeline, process, comparison)
+└── ornament-generators.js    (borders, dividers, accents, patterns)
+```
+
+**Usage Pattern:**
+```javascript
+// Import at top of HTML <script> section
+const { generateBarChart } = chartsLib;
+const { heroicons } = iconsLib;
+
+// Use in slide generation
+function createStatsSlide(data) {
+  const chart = generateBarChart(data, '#4f46e5');
+  const icon = heroicons['chart-bar'];
+  return `
+    <section class="slide" data-notes="...">
+      <h2>${heroicons['chart-bar']} Sales Metrics</h2>
+      ${chart}
+    </section>
+  `;
+}
+```
+
+---
+
+### Slide Type → Visual Element Mapping
+
+| Slide Type | Primary Visual | Tool | Example |
+|---|---|---|---|
+| **Title/Cover** | Ornament + decorative mark | `generateCornerAccent()` or CSS gradient | Top accent line + corner flourish |
+| **Problem/Pain** | Icon + optional tint overlay | `heroicons['lightning-bolt']` | Lightning icon in color accent |
+| **Solution/Benefit** | Icon + highlight box | `heroicons['check-circle']` or `['star']` | Green checkmark or star icon |
+| **Stats/Metrics** | Bar/Pie/Line chart | `generateBarChart/PieChart/LineChart()` | Quarterly sales as bar chart |
+| **Process/Steps** | Numbered step diagram | `generateProcessSteps()` | 1→2→3 with connecting line |
+| **Features List** | Icon grid + bullets | `heroicons['*']` array | 4 feature icons + descriptions |
+| **Comparison** | Two-column with divider | `generateComparison()` | Option A vs Option B grid |
+| **Timeline/Journey** | Vertical timeline | `generateTimeline()` | 2020, 2021, 2022 milestones |
+| **Flowchart/Workflow** | Connected boxes + arrows | `generateFlowchart()` | Start→Decide→Execute→Result |
+| **Testimonial** | Avatar circle + quote mark | CSS circle + `heroicons` | Profile circle + quote icon |
+| **Call-to-Action** | Large icon + accent | `generateBurst()` or `heroicons['gift']` | Gift burst or big arrow |
+| **Closing** | Ornament + brand accent | `generateTopBorder()` + gradient | Top rule + color accent |
+
+---
+
+### SVG Generation Code Patterns
+
+#### Charts (Self-Contained)
+
+**Bar Chart:**
+```javascript
+generateBarChart(
+  [
+    {label: 'Q1', value: 100},
+    {label: 'Q2', value: 150},
+    {label: 'Q3', value: 120},
+    {label: 'Q4', value: 200}
+  ],
+  ['#4f46e5', '#06b6d4', '#ec4899', '#f59e0b'],
+  {width: 400, height: 250}
+)
+// Returns: <svg>...</svg> string ready to embed
+```
+
+**Pie Chart:**
+```javascript
+generatePieChart(
+  [
+    {label: 'Product', value: 45},
+    {label: 'Service', value: 35},
+    {label: 'Other', value: 20}
+  ],
+  ['#ef4444', '#3b82f6', '#10b981']
+)
+```
+
+**Progress Bar:**
+```javascript
+generateProgressBar(75, 100, '#4f46e5', {
+  label: '75% Complete'
+})
+```
+
+#### Diagrams (Self-Contained)
+
+**Flowchart:**
+```javascript
+generateFlowchart(
+  [
+    {id: '1', label: 'Start'},
+    {id: '2', label: 'Plan'},
+    {id: '3', label: 'Execute'},
+    {id: '4', label: 'Review'}
+  ],
+  '#4f46e5'
+)
+```
+
+**Process Steps:**
+```javascript
+generateProcessSteps(
+  [
+    {num: 1, title: 'Research', description: 'Understand the market'},
+    {num: 2, title: 'Design', description: 'Create mockups'},
+    {num: 3, title: 'Develop', description: 'Build the product'}
+  ],
+  '#06b6d4'
+)
+```
+
+**Timeline:**
+```javascript
+generateTimeline(
+  [
+    {year: '2020', title: 'Founded', description: 'Started with idea'},
+    {year: '2021', title: 'Launch', description: 'Released MVP'},
+    {year: '2022', title: 'Growth', description: '10k users'}
+  ],
+  '#8b5cf6'
+)
+```
+
+**Comparison:**
+```javascript
+generateComparison(
+  [
+    {left: 'Expensive', right: 'Affordable'},
+    {left: 'Slow setup', right: 'Quick start'},
+    {left: 'Complex UI', right: 'Simple interface'}
+  ],
+  ['#ef4444', '#10b981'],
+  {title1: 'Before', title2: 'After'}
+)
+```
+
+#### Icons (Inline SVG)
+
+**Embed icon in text:**
+```html
+<h2 style="display:flex; align-items:center; gap:12px;">
+  ${heroicons['rocket-launch']}
+  Launch Your Product
+</h2>
+```
+
+**Icon grid for features:**
+```javascript
+const features = [
+  {icon: 'sparkles', text: 'Easy to use'},
+  {icon: 'lightning-bolt', text: 'Super fast'},
+  {icon: 'check-circle', text: 'Reliable'},
+  {icon: 'rocket-launch', text: 'Scalable'}
+];
+
+let grid = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">';
+features.forEach(f => {
+  grid += `
+    <div style="text-align:center;">
+      <div style="font-size:40px; margin-bottom:10px;">
+        ${heroicons[f.icon]}
+      </div>
+      <p>${f.text}</p>
+    </div>
+  `;
+});
+grid += '</div>';
+```
+
+#### Ornaments (Decorative)
+
+**Top Border:**
+```javascript
+generateTopBorder('#4f46e5', 'wave')
+// styles: 'line' | 'wave' | 'dashes' | 'dots'
+```
+
+**Divider with text:**
+```javascript
+generateDividerLine('#e5e7eb', 'or')
+```
+
+**Corner Accent:**
+```javascript
+generateCornerAccent('#4f46e5', 'top-right', 60)
+// positions: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left'
+```
+
+**Gradient Background:**
+```javascript
+// Use in CSS for slide background
+const bg = generateGradientBg(
+  ['#4f46e5', '#06b6d4', '#ec4899'],
+  '135deg'
+);
+// Returns: "linear-gradient(135deg, #4f46e5 0%, #06b6d4 50%, #ec4899 100%)"
+// Apply: style="background: ${bg};"
+```
+
+---
+
+### Media Slot Pattern (When Not Using SVG)
+
+For slides that need user-provided images:
+
+```html
+<div class="media-slot" data-slot="PRODUCT">
+  <span class="slot-label">[ PRODUCT SCREENSHOT ]</span>
+</div>
+```
+
+**CSS:**
+```css
+.media-slot {
+  aspect-ratio: 16 / 9;
+  background: #f3f4f6;
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  min-height: 300px;
+}
+
+.media-slot:hover {
+  background: #e5e7eb;
+  border-color: #4f46e5;
+}
+
+.slot-label {
+  color: #9ca3af;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.media-slot img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+}
+```
+
+**Instructions:**
+```html
+<!-- Comment before media slot to guide user -->
+<!-- Replace with PRODUCT screenshot: full-page view showing dashboard -->
+<div class="media-slot" data-slot="SCREENSHOT">
+  <span class="slot-label">[ PRODUCT SCREENSHOT ]</span>
+</div>
+```
+
+---
+
+### Implementation Checklist
+
+Before generating each slide:
+
+- ✅ Identify slide type from mapping table
+- ✅ Choose visual element type
+- ✅ If SVG: call appropriate `generate*()` function
+- ✅ If Icon: pick from `heroicons[name]`
+- ✅ If Image: create media slot with label
+- ✅ Embed with `data-anim` for layer reveal in Presenter Mode
+- ✅ Verify visual and text don't overlap
+- ✅ Test in Presenter Mode with zoom + layer reveal
 
 ---
 

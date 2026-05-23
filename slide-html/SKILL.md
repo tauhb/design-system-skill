@@ -108,8 +108,8 @@ Where:
 | Self-contained | All CSS + JS inline — zero runtime external deps |
 | Google Fonts | One `<link>` in `<head>` — only allowed external call |
 | Visual elements | Every content slide ≥ 1 non-text visual (icon, chart, media slot, or ornament) |
-| Inline editing | Always include Edit Mode — never ask user — see spec below |
-| Presenter Mode | Always include — never ask user — see spec below |
+| Inline editing | Always include Edit Mode — never ask user — follow implementation guide below |
+| Presenter Mode | Always include — never ask user — follow implementation guide below |
 | Layer reveal | Every `[data-anim]` element is a layer — reveal one group per Next in presenter |
 | Speaker notes | Every `<section class="slide">` must have `data-notes="..."` attribute |
 
@@ -237,7 +237,738 @@ document.addEventListener('keydown', e => {
 
 ---
 
-## Phase 4 — Delivery
+## Implementation Guides
+
+### Edit Mode Implementation
+
+**Always include in every output. Never ask the user.**
+
+**Critical:** Do NOT use CSS `~` sibling selector for hover. Pointer-events behavior breaks the hover chain. Must use JS with 400ms timeout.
+
+**HTML Structure:**
+
+```html
+<!-- Edit hotzone (top-left corner) + toggle button -->
+<div class="edit-hotzone"></div>
+<button class="edit-toggle" id="editToggle" title="Edit mode (E)">✏️</button>
+
+<!-- Edit banner (appears when edit mode active) -->
+<div class="edit-banner">
+  <span>Edit Mode Active</span>
+  <button id="editClose">×</button>
+</div>
+```
+
+**CSS:**
+
+```css
+.edit-hotzone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 80px;
+  height: 80px;
+  z-index: 10000;
+  cursor: pointer;
+}
+
+.edit-toggle {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 10001;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+.edit-toggle.show,
+.edit-toggle.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.edit-active [contenteditable] {
+  outline: 2px dashed rgba(99, 102, 241, 0.5);
+  outline-offset: 2px;
+}
+
+.edit-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: rgba(59, 130, 246, 0.9);
+  color: white;
+  overflow: hidden;
+  transition: height 0.3s ease;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+.edit-banner.show {
+  height: 40px;
+}
+```
+
+**JavaScript:**
+
+```javascript
+class DeckEditor {
+  constructor(deckSlug) {
+    this.deckSlug = deckSlug;
+    this.isActive = false;
+    this.setupEditMode();
+    this.setupHotzone();
+    this.setupKeyboard();
+    this.setupAutoSave();
+  }
+
+  setupHotzone() {
+    const hotzone = document.querySelector('.edit-hotzone');
+    const toggle = document.getElementById('editToggle');
+    let hideTimeout = null;
+
+    const showButton = () => {
+      clearTimeout(hideTimeout);
+      toggle.classList.add('show');
+    };
+
+    const hideButton = () => {
+      hideTimeout = setTimeout(() => {
+        if (!this.isActive) toggle.classList.remove('show');
+      }, 400);
+    };
+
+    hotzone.addEventListener('mouseenter', showButton);
+    hotzone.addEventListener('mouseleave', hideButton);
+    hotzone.addEventListener('click', () => this.toggleEditMode());
+    toggle.addEventListener('mouseenter', showButton);
+    toggle.addEventListener('mouseleave', hideButton);
+    toggle.addEventListener('click', () => this.toggleEditMode());
+  }
+
+  setupKeyboard() {
+    document.addEventListener('keydown', (e) => {
+      if ((e.key === 'e' || e.key === 'E') && !e.target.getAttribute('contenteditable')) {
+        this.toggleEditMode();
+      }
+      if (e.key === 's' && (e.ctrlKey || e.metaKey) && this.isActive) {
+        e.preventDefault();
+        this.exportFile();
+      }
+      if (e.key === 'Escape' && this.isActive) {
+        this.toggleEditMode();
+      }
+    });
+  }
+
+  toggleEditMode() {
+    this.isActive = !this.isActive;
+    const body = document.body;
+    const toggle = document.getElementById('editToggle');
+    const banner = document.querySelector('.edit-banner');
+
+    if (this.isActive) {
+      body.classList.add('edit-active');
+      toggle.classList.add('active');
+      banner?.classList.add('show');
+      
+      // Make all text elements editable
+      document.querySelectorAll('h1, h2, h3, p, li, td, th, span:not(.slot-label)').forEach(el => {
+        el.setAttribute('contenteditable', 'true');
+      });
+
+      // Make media slots clickable for image replacement
+      document.querySelectorAll('.media-slot').forEach(slot => {
+        slot.style.cursor = 'pointer';
+        slot.addEventListener('click', (e) => this.handleImageUpload(e, slot));
+      });
+    } else {
+      body.classList.remove('edit-active');
+      toggle.classList.remove('active');
+      banner?.classList.remove('show');
+      
+      document.querySelectorAll('[contenteditable]').forEach(el => {
+        el.removeAttribute('contenteditable');
+      });
+    }
+  }
+
+  handleImageUpload(e, slot) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = slot.querySelector('img') || document.createElement('img');
+          img.src = e.target.result;
+          img.style.maxWidth = '100%';
+          img.style.maxHeight = '400px';
+          img.style.objectFit = 'contain';
+          if (!slot.querySelector('img')) slot.appendChild(img);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+    input.click();
+  }
+
+  setupAutoSave() {
+    document.addEventListener('input', () => this.saveToLocalStorage());
+    document.addEventListener('blur', () => this.saveToLocalStorage(), true);
+  }
+
+  saveToLocalStorage() {
+    if (this.isActive) {
+      localStorage.setItem(`deck-${this.deckSlug}`, document.documentElement.outerHTML);
+    }
+  }
+
+  exportFile() {
+    // CRITICAL: Strip edit state before export
+    const editableEls = Array.from(document.querySelectorAll('[contenteditable]'));
+    editableEls.forEach(el => el.removeAttribute('contenteditable'));
+    document.body.classList.remove('edit-active');
+
+    const toggle = document.getElementById('editToggle');
+    const banner = document.querySelector('.edit-banner');
+    toggle?.classList.remove('active', 'show');
+    banner?.classList.remove('show');
+
+    const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+
+    // Restore edit state
+    document.body.classList.add('edit-active');
+    editableEls.forEach(el => el.setAttribute('contenteditable', 'true'));
+    toggle?.classList.add('active');
+    banner?.classList.add('show');
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${this.deckSlug}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  restoreFromLocalStorage() {
+    const saved = localStorage.getItem(`deck-${this.deckSlug}`);
+    if (saved) {
+      return confirm('Restore last session?');
+    }
+    return false;
+  }
+}
+
+// Initialize at bottom of script
+const deckEditor = new DeckEditor('{deck-slug}');
+if (deckEditor.restoreFromLocalStorage()) {
+  document.documentElement.innerHTML = localStorage.getItem(`deck-${deckEditor.deckSlug}`);
+}
+```
+
+---
+
+### Presenter Mode Implementation
+
+**Always include in every output. Never ask the user. Toggle with `P` key.**
+
+**HTML Structure:**
+
+```html
+<div id="presenter-mode" class="hidden">
+  <div id="ps-main">
+    <div id="ps-deck-wrap">
+      <!-- Cloned slides go here -->
+    </div>
+  </div>
+  
+  <div id="ps-sidebar">
+    <div id="ps-notes">
+      <div id="ps-notes-header">
+        <span id="ps-layer-counter">●●○○ (1/4)</span>
+        <button id="ps-reveal-next">Reveal (1/4) →</button>
+      </div>
+      <div id="ps-script"><!-- Speaker notes here --></div>
+    </div>
+    
+    <div id="ps-preview">
+      <p>Next slide</p>
+      <div id="ps-preview-content"><!-- Next slide clone --></div>
+    </div>
+  </div>
+</div>
+
+<!-- Navigation controls -->
+<div id="ps-nav" class="hidden">
+  <button id="ps-prev">← Prev</button>
+  <button id="ps-next">Next →</button>
+  <button id="ps-close">Exit Presenter (P)</button>
+</div>
+```
+
+**CSS:**
+
+```css
+#presenter-mode {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #000;
+  z-index: 5000;
+  display: grid;
+  grid-template-columns: 72fr 28fr;
+  gap: 0;
+}
+
+#presenter-mode.hidden {
+  display: none;
+}
+
+#ps-main {
+  background: #000;
+  overflow: hidden;
+  position: relative;
+}
+
+#ps-deck-wrap {
+  width: 100vw;
+  height: 100vh;
+  transform-origin: top left;
+  transition: transform 0.4s ease;
+}
+
+#ps-deck-wrap.zoomed {
+  cursor: zoom-out;
+}
+
+#ps-deck-wrap:not(.zoomed) {
+  cursor: zoom-in;
+}
+
+#ps-sidebar {
+  background: #1a1a1a;
+  color: #fff;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 0;
+  border-left: 1px solid #333;
+  overflow: hidden;
+}
+
+#ps-notes {
+  padding: 16px;
+  overflow-y: auto;
+}
+
+#ps-notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+#ps-layer-counter {
+  color: #888;
+  letter-spacing: 1px;
+}
+
+#ps-reveal-next {
+  padding: 6px 12px;
+  background: #4f46e5;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#ps-script {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #ccc;
+}
+
+#ps-preview {
+  padding: 16px;
+  border-top: 1px solid #333;
+  overflow-y: auto;
+  background: #0a0a0a;
+}
+
+#ps-preview p {
+  color: #888;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+#ps-preview-content {
+  aspect-ratio: 16 / 9;
+  background: #333;
+  border-radius: 4px;
+  overflow: hidden;
+  transform: scale(0.5);
+  transform-origin: top left;
+  opacity: 0.5;
+}
+
+#ps-nav {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  z-index: 5001;
+}
+
+#ps-nav button {
+  padding: 10px 16px;
+  background: rgba(79, 70, 229, 0.8);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+#ps-nav button:hover {
+  background: rgba(79, 70, 229, 1);
+}
+```
+
+**JavaScript:**
+
+```javascript
+class PresenterMode {
+  constructor() {
+    this.isActive = false;
+    this.currentSlide = 0;
+    this.layerIndex = 0;
+    this.zoomed = false;
+    this.setupPresenter();
+  }
+
+  setupPresenter() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'p' || e.key === 'P') {
+        this.togglePresenterMode();
+      }
+      if (this.isActive) {
+        if (e.key === 'ArrowRight' || e.key === ' ') this.nextLayer();
+        if (e.key === 'ArrowLeft') this.prevSlide();
+        if (e.key === 'Escape') this.resetZoom();
+      }
+    });
+
+    document.getElementById('ps-reveal-next').addEventListener('click', () => this.nextLayer());
+    document.getElementById('ps-next').addEventListener('click', () => this.nextSlide());
+    document.getElementById('ps-prev').addEventListener('click', () => this.prevSlide());
+    document.getElementById('ps-close').addEventListener('click', () => this.togglePresenterMode());
+
+    document.getElementById('ps-deck-wrap').addEventListener('click', (e) => this.handleZoom(e));
+  }
+
+  togglePresenterMode() {
+    this.isActive = !this.isActive;
+    document.getElementById('presenter-mode').classList.toggle('hidden');
+    document.getElementById('ps-nav').classList.toggle('hidden');
+
+    if (this.isActive) {
+      this.renderPresenterView();
+    }
+  }
+
+  renderPresenterView() {
+    const slides = document.querySelectorAll('section.slide');
+    const wrap = document.getElementById('ps-deck-wrap');
+    wrap.innerHTML = '';
+
+    slides.forEach(slide => {
+      const clone = slide.cloneNode(true);
+      // DO NOT add is-active — all data-anim start at opacity: 0
+      wrap.appendChild(clone);
+    });
+
+    this.showSlide(0);
+  }
+
+  showSlide(index) {
+    this.currentSlide = index;
+    this.layerIndex = 0;
+
+    const slides = document.querySelectorAll('#ps-deck-wrap section.slide');
+    const scale = this.calculateScale();
+    document.getElementById('ps-deck-wrap').style.transform = `scale(${scale})`;
+
+    const slide = slides[index];
+    const notes = slide.getAttribute('data-notes') || 'No notes for this slide';
+    document.getElementById('ps-script').textContent = notes;
+
+    // Get next slide for preview
+    const nextSlide = slides[index + 1];
+    if (nextSlide) {
+      document.getElementById('ps-preview-content').innerHTML = nextSlide.innerHTML;
+    }
+
+    this.updateLayerCounter();
+  }
+
+  calculateScale() {
+    const container = document.getElementById('ps-main');
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    return Math.min(w / 100, h / 100); // Assuming 100vw/100vh slides
+  }
+
+  nextLayer() {
+    const slides = document.querySelectorAll('#ps-deck-wrap section.slide');
+    const currentSlideEl = slides[this.currentSlide];
+    const layers = Array.from(currentSlideEl.querySelectorAll('[data-anim]')).reduce((acc, el) => {
+      const d = el.getAttribute('style')?.match(/--d:(\d+)/)?.[1] || '1';
+      acc[d] = acc[d] || [];
+      acc[d].push(el);
+      return acc;
+    }, {});
+
+    const layerKeys = Object.keys(layers).sort((a, b) => a - b);
+    if (this.layerIndex < layerKeys.length) {
+      const currentLayerKey = layerKeys[this.layerIndex];
+      layers[currentLayerKey].forEach(el => el.classList.add('layer-revealed'));
+      this.layerIndex++;
+      this.updateLayerCounter();
+    } else {
+      this.nextSlide();
+    }
+  }
+
+  nextSlide() {
+    const slides = document.querySelectorAll('#ps-deck-wrap section.slide');
+    if (this.currentSlide < slides.length - 1) {
+      this.showSlide(this.currentSlide + 1);
+    }
+  }
+
+  prevSlide() {
+    if (this.currentSlide > 0) {
+      this.showSlide(this.currentSlide - 1);
+    }
+  }
+
+  updateLayerCounter() {
+    const slides = document.querySelectorAll('#ps-deck-wrap section.slide');
+    const slide = slides[this.currentSlide];
+    const totalLayers = new Set(
+      Array.from(slide.querySelectorAll('[data-anim]')).map(el => 
+        el.getAttribute('style')?.match(/--d:(\d+)/)?.[1] || '1'
+      )
+    ).size;
+
+    const counter = document.getElementById('ps-layer-counter');
+    const button = document.getElementById('ps-reveal-next');
+    
+    if (this.layerIndex < totalLayers) {
+      counter.textContent = `●${Array(this.layerIndex).fill('●').join('')}${Array(totalLayers - this.layerIndex).fill('○').join('')} (${this.layerIndex}/${totalLayers})`;
+      button.textContent = `Reveal (${this.layerIndex + 1}/${totalLayers}) →`;
+    } else {
+      counter.textContent = `${Array(totalLayers).fill('●').join('')} (${totalLayers}/${totalLayers})`;
+      button.textContent = 'Next slide →';
+    }
+  }
+
+  handleZoom(e) {
+    const wrap = document.getElementById('ps-deck-wrap');
+    if (this.zoomed) {
+      this.resetZoom();
+      return;
+    }
+
+    const rect = wrap.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(1);
+    const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(1);
+
+    wrap.style.transformOrigin = `${x}% ${y}%`;
+    wrap.style.transform = `scale(2.2)`;
+    wrap.classList.add('zoomed');
+    this.zoomed = true;
+  }
+
+  resetZoom() {
+    const wrap = document.getElementById('ps-deck-wrap');
+    wrap.style.transform = '';
+    wrap.style.transformOrigin = '';
+    wrap.classList.remove('zoomed');
+    this.zoomed = false;
+  }
+}
+
+// Initialize
+const presenterMode = new PresenterMode();
+```
+
+---
+
+### Layer Reveal + Speaker Notes Pattern
+
+**Every slide must include `data-notes` attribute:**
+
+```html
+<section class="slide" data-notes="This is the speaker script for this slide. Explain the key points, transition words, etc.">
+  <h2>Slide Title</h2>
+  
+  <!-- Layer 1 -->
+  <p data-anim="fade-up" style="--d:1">First point appears</p>
+  
+  <!-- Layer 2 -->
+  <p data-anim="fade-up" style="--d:2">Second point appears</p>
+  
+  <!-- Layer 3 -->
+  <ul data-anim="fade-up" style="--d:3">
+    <li>Detail 1</li>
+    <li>Detail 2</li>
+  </ul>
+</section>
+```
+
+**CSS for layer reveal:**
+
+```css
+[data-anim] {
+  opacity: 0; /* Start hidden */
+}
+
+[data-anim="fade-up"].layer-revealed {
+  animation: fadeUp 0.55s var(--ease) forwards;
+}
+
+[data-anim="fade-in"].layer-revealed {
+  animation: fadeIn 0.45s ease forwards;
+}
+
+[data-anim="scale-in"].layer-revealed {
+  animation: scaleIn 0.55s var(--ease) forwards;
+}
+
+[data-anim="reveal-r"].layer-revealed {
+  animation: revealRight 0.55s var(--ease) forwards;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes revealRight {
+  from { opacity: 0; transform: translateX(-30px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+```
+
+---
+
+### HTML Base Template Reference
+
+Follow `skills/slide-html/references/html-template.md` exactly for:
+- DOCTYPE and meta tags
+- CSS Custom Properties (theme tokens)
+- Base styles from `viewport-base.css`
+- Animation patterns from `animation-patterns.md`
+- Font setup from `vn-typography.md`
+
+Minimal template structure:
+
+```html
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{Deck Title}</title>
+  
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={Font1}:{weights}&family={Font2}:{weights}&display=swap">
+  
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #000000;
+      --accent: #4f46e5;
+      --font-display: '{Font1}', sans-serif;
+      --font-body: '{Font2}', sans-serif;
+    }
+    
+    /* Paste viewport-base.css content here */
+    /* Paste animation-patterns.md content here */
+    /* Add preset-specific styles here */
+  </style>
+</head>
+
+<body>
+  <!-- Edit hotzone + toggle button -->
+  <div class="edit-hotzone"></div>
+  <button class="edit-toggle" id="editToggle">✏️</button>
+  <div class="edit-banner"><span>Edit Mode</span><button id="editClose">×</button></div>
+  
+  <!-- Presenter mode -->
+  <div id="presenter-mode" class="hidden">...</div>
+  <div id="ps-nav" class="hidden">...</div>
+  
+  <!-- Main slides -->
+  <div class="deck">
+    <section class="slide title-slide" data-notes="Opening script...">
+      ...
+    </section>
+    
+    <!-- More slides with data-notes + data-anim elements -->
+  </div>
+
+  <script>
+    // Edit mode controller
+    const deckEditor = new DeckEditor('{deck-slug}');
+    
+    // Presenter mode controller
+    const presenterMode = new PresenterMode();
+    
+    // Main navigation
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+      if (e.key === 'ArrowLeft') prevSlide();
+    });
+  </script>
+</body>
+</html>
+```
+
+---
 
 1. Open deck:
    ```
